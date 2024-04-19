@@ -10,7 +10,10 @@ import android.view.SurfaceView
 import android.view.View
 import android.widget.EditText
 import android.widget.Toast
-import android.widget.VideoView
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.PeriodicWorkRequest
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import com.example.videolistening.api.ListVideoAPI
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -19,7 +22,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
-import java.util.logging.Handler
+import java.util.concurrent.TimeUnit
 
 class MainActivity : AppCompatActivity() {
     lateinit var listVideoAPI: ListVideoAPI
@@ -39,30 +42,18 @@ class MainActivity : AppCompatActivity() {
         listVideoAPI = ListVideoAPI(applicationContext)
         key = findViewById(R.id.key)
         period = findViewById(R.id.period)
+
         surfaceView = findViewById(R.id.surfaceView)
         val surfaceHolder = surfaceView.holder
         surfaceHolder.addCallback(object: SurfaceHolder.Callback {
-            override fun surfaceCreated(holder: SurfaceHolder) {
-                mediaPlayer.setDisplay(holder)
-            }
-
-            override fun surfaceChanged(
-                holder: SurfaceHolder,
-                format: Int,
-                width: Int,
-                height: Int
-            ) {
-
-            }
-
-            override fun surfaceDestroyed(holder: SurfaceHolder) {
-                mediaPlayer.setDisplay(null)
-            }
-
+            override fun surfaceCreated(holder: SurfaceHolder) { mediaPlayer.setDisplay(holder) }
+            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
+            override fun surfaceDestroyed(holder: SurfaceHolder) { mediaPlayer.setDisplay(null) }
         })
 
         val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
         if(prefs.contains("key") && prefs.contains("period")){
+            StartTimerOnGETQuery(prefs.getInt("period", 12))
             surfaceView.visibility = View.VISIBLE
 
             key.setText(prefs.getString("key", ""))
@@ -73,34 +64,61 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    fun SaveConfig(view: View){
-        var keyText = key.text.toString()
-        var periodText = period.text.toString()
-        if(keyText.isNotEmpty() && periodText.isNotEmpty())
-        {
-            surfaceView.visibility = View.VISIBLE
-
-            val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
-            val editor = prefs.edit()
-            editor.putString("key", keyText)
-            editor.putInt("period", periodText.toInt())
-            editor.apply()
-            CoroutineScope(Dispatchers.IO).launch {
-                println("Работа с API началась")
-                listVideoAPI.getLinks(keyText)
-                val deferred = async {
-                    dbHelper.getAllVideoNames()
-                }
-                videoNames = deferred.await()
-
-                withContext(Dispatchers.Main) {
-                    println("Запускаем первое видео")
-                    playVideoAtIndex(0)
+    fun StartTimerOnGETQuery(period: Int){
+        val workManager = WorkManager.getInstance(this)
+        workManager.getWorkInfosForUniqueWork("backgroundWorker").get()
+            .forEach{
+                workInfo ->
+                if(workInfo.state == WorkInfo.State.RUNNING || workInfo.state == WorkInfo.State.ENQUEUED){
+                    return
                 }
             }
+
+        val periodicWorkRequest = PeriodicWorkRequest.Builder(
+            BackgroundWorker::class.java,
+            period.toLong(),
+            TimeUnit.HOURS
+        ).build()
+
+        workManager.enqueueUniquePeriodicWork("backgroundWorker",
+            ExistingPeriodicWorkPolicy.KEEP,
+            periodicWorkRequest)
+    }
+
+    fun SaveConfig(view: View){
+        try{
+            var keyText = key.text.toString()
+            var periodText = period.text.toString()
+            if(keyText.isNotEmpty() && periodText.isNotEmpty())
+            {
+                surfaceView.visibility = View.VISIBLE
+
+                val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
+                val editor = prefs.edit()
+                editor.putString("key", keyText)
+                editor.putInt("period", periodText.toInt())
+                editor.apply()
+                CoroutineScope(Dispatchers.IO).launch {
+                    println("Работа с API началась")
+                    listVideoAPI.getLinks(keyText)
+                    val deferred = async {
+                        dbHelper.getAllVideoNames()
+                    }
+                    videoNames = deferred.await()
+
+                    withContext(Dispatchers.Main) {
+                        println("Запускаем первое видео")
+                        StartTimerOnGETQuery(periodText.toInt())
+                        playVideoAtIndex(0)
+                    }
+                }
+            }
+            else
+                Toast.makeText(this, "Заполните поле", Toast.LENGTH_SHORT)
         }
-        else
-            Toast.makeText(this, "Заполните поле", Toast.LENGTH_SHORT)
+        catch (e: Exception){
+            e.printStackTrace()
+        }
     }
 
     private lateinit var mediaPlayer: MediaPlayer
