@@ -9,8 +9,9 @@ import com.example.videolistening.api.ListVideoAPI
 class BackgroundWorker(context: Context, workerParams: WorkerParameters) : Worker(context, workerParams) {
     override fun doWork(): Result {
 
+        println("Запущен worker")
         CheckNewVideos()
-
+        println("worker отработал")
         return Result.success()
     }
 

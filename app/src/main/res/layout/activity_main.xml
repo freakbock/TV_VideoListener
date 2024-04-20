@@ -47,6 +47,13 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/period" />
 
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:id="@+id/background_white"
+        android:layout_width="match_parent"
+        android:background="@color/white"
+        android:visibility="gone"
+        android:layout_height="match_parent"/>
+
     <SurfaceView
         android:id="@+id/surfaceView"
         android:visibility="gone"
