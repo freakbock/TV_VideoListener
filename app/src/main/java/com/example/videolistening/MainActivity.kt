@@ -20,6 +20,7 @@ import com.example.videolistening.api.ListVideoAPI
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -48,6 +49,13 @@ class MainActivity : AppCompatActivity() {
         background_white = findViewById(R.id.background_white)
 
         surfaceView = findViewById(R.id.surfaceView)
+
+        surfaceView.holder.surface.release()
+        surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
+            override fun surfaceCreated(holder: SurfaceHolder) {mediaPlayer.setDisplay(holder)}
+            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
+            override fun surfaceDestroyed(holder: SurfaceHolder) {mediaPlayer.setDisplay(null)}
+        })
 //        val surfaceHolder = surfaceView.holder
 //        surfaceHolder.addCallback(object: SurfaceHolder.Callback {
 //            override fun surfaceCreated(holder: SurfaceHolder) {mediaPlayer.setDisplay(holder) }
@@ -58,38 +66,48 @@ class MainActivity : AppCompatActivity() {
 
         val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
         if(prefs.contains("key") && prefs.contains("period")){
-            StartTimerOnGETQuery(prefs.getInt("period", 12))
+
+            CoroutineScope(Dispatchers.IO).launch {
+                listVideoAPI.getLinks(prefs.getString("key", "").toString())
+            }
+
+            StartTimerOnGETQuery(prefs.getInt("period", 15))
 
             surfaceView.visibility = View.VISIBLE
 
             key.setText(prefs.getString("key", ""))
-            period.setText(prefs.getInt("period", 12).toString())
+            period.setText(prefs.getInt("period", 15).toString())
             videoNames = dbHelper.getAllVideoNames()
-            if(videoNames.size == 0){
-                getVideoLinksAPI(prefs.getString("key", "").toString(), prefs.getInt("period", 1).toString())
-            }
-            else{
-                playVideoAtIndex(0)
-            }
+
+            playVideoAtIndex(0)
         }
     }
 
     fun StartTimerOnGETQuery(period: Int){
+        println("Запускаем Worker... ПЕРИОД: ${period.toLong()}")
         val workManager = WorkManager.getInstance(this)
         workManager.getWorkInfosForUniqueWork("backgroundWorker").get()
             .forEach{
                 workInfo ->
                 if(workInfo.state == WorkInfo.State.RUNNING || workInfo.state == WorkInfo.State.ENQUEUED){
+                    println("Worker уже запущен")
                     return
                 }
             }
 
+        val workInfos = workManager.getWorkInfosForUniqueWork("backgroundWorker").get()
+        val numberOfWorkers = workInfos.size
+        println("Запущенных WORKER: $numberOfWorkers")
+
         val periodicWorkRequest = PeriodicWorkRequest.Builder(
             BackgroundWorker::class.java,
+            period.toLong()+1,
+            TimeUnit.MINUTES,
             period.toLong(),
-            TimeUnit.HOURS
-        ).build()
+            TimeUnit.MINUTES)
+        .build()
 
+        println("Worker поставлен на таймер")
         workManager.enqueueUniquePeriodicWork("backgroundWorker",
             ExistingPeriodicWorkPolicy.KEEP,
             periodicWorkRequest)
@@ -99,10 +117,9 @@ class MainActivity : AppCompatActivity() {
         CoroutineScope(Dispatchers.IO).launch {
             println("Работа с API началась")
             listVideoAPI.getLinks(keyText)
-            val deferred = async {
-                dbHelper.getAllVideoNames()
-            }
-            videoNames = deferred.await()
+            println("API отработало")
+            videoNames = dbHelper.getAllVideoNames()
+            delay(1000)
 
             withContext(Dispatchers.Main) {
                 println("Запускаем первое видео")
@@ -127,6 +144,7 @@ class MainActivity : AppCompatActivity() {
                 editor.apply()
 
                 getVideoLinksAPI(keyText, periodText)
+
             }
             else
                 Toast.makeText(this, "Заполните поле", Toast.LENGTH_SHORT)
@@ -151,13 +169,6 @@ class MainActivity : AppCompatActivity() {
                     setDataSource(path)
                     prepareAsync()
                     setOnPreparedListener {
-
-                        surfaceView.holder.surface.release()
-                        surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
-                            override fun surfaceCreated(holder: SurfaceHolder) {setDisplay(holder)}
-                            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
-                            override fun surfaceDestroyed(holder: SurfaceHolder) {setDisplay(null)}
-                        })
 
                         // Воспроизводим видео только после его подготовки
                         println("ЗАПУСКАЕМ ВИДЕО ${videoNames[index]}")
@@ -195,6 +206,15 @@ class MainActivity : AppCompatActivity() {
         } else if(videoNames.size !=0){
             playVideoAtIndex(0)
         }
+        else{
+            println("Ожидаем видео...")
+            Thread.sleep(1000)
+            android.os.Handler().postDelayed({
+                isVideoListUpdated()
+                playVideoAtIndex(0)
+            }, 1000)
+
+        }
     }
 
     fun isVideoListUpdated(): Boolean{
@@ -211,6 +231,8 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         mediaPlayer.release() // Освободить ресурсы MediaPlayer при уничтожении активности
+        val workManager = WorkManager.getInstance(this)
+        workManager.cancelUniqueWork("backgroundWorker")
     }
 
 }

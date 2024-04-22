@@ -25,31 +25,36 @@ class VideoManager(context: Context) {
     }
 
     fun downloadVideo(videoFileName: String, listener: VideoDownloadListener) {
-        val videoUrl = videoFileName
-        val outputFile = File(context.filesDir, videoFileName)
+        try{
+            val videoUrl = videoFileName
+            val outputFile = File(context.filesDir, videoFileName)
 
-        val call = apiService.downloadVideo(videoUrl)
-        call.enqueue(object : Callback<ResponseBody> {
-            override fun onResponse(call: Call<ResponseBody>, response: Response<ResponseBody>) {
-                if (response.isSuccessful) {
-                    val success = writeResponseBodyToDisk(response.body(), outputFile)
-                    if (success) {
-                        listener.onDownloadComplete(outputFile)
-                        println("Видео загружено: $videoFileName")
+            val call = apiService.downloadVideo(videoUrl)
+            call.enqueue(object : Callback<ResponseBody> {
+                override fun onResponse(call: Call<ResponseBody>, response: Response<ResponseBody>) {
+                    if (response.isSuccessful) {
+                        val success = writeResponseBodyToDisk(response.body(), outputFile)
+                        if (success) {
+                            listener.onDownloadComplete(outputFile)
+                            println("Видео загружено: $videoFileName")
+                        } else {
+                            listener.onDownloadFailed()
+                            println("Видео не удалось загрузить: $videoFileName")
+                        }
                     } else {
                         listener.onDownloadFailed()
                         println("Видео не удалось загрузить: $videoFileName")
                     }
-                } else {
-                    listener.onDownloadFailed()
-                    println("Видео не удалось загрузить: $videoFileName")
                 }
-            }
 
-            override fun onFailure(call: Call<ResponseBody>, t: Throwable) {
-                listener.onDownloadFailed()
-            }
-        })
+                override fun onFailure(call: Call<ResponseBody>, t: Throwable) {
+                    listener.onDownloadFailed()
+                }
+            })
+        }
+        catch (e: Exception){
+            e.printStackTrace()
+        }
     }
 
     private fun writeResponseBodyToDisk(body: ResponseBody?, outputFile: File): Boolean {
